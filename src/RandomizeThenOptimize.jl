@@ -3,7 +3,7 @@ module RandomizeThenOptimize
 
     # ===== TYPE: Problem =====
     # contains everything we need to describe inference problem
-    export Problem
+    export Problem, EmptyModel
     type Problem
         n::Integer #dimension of parameters
         m::Integer #dimension of data
@@ -13,23 +13,31 @@ module RandomizeThenOptimize
         L_pr::AbstractMatrix #L'*L = Covariance^(-1), for prior
         L_obs::AbstractMatrix #L'*L = Covariance^(-1), for observational noise
         opt::NLopt.Opt #NLopt optimization settings
+        verbose::Bool #whether to output progress
     end
 
     function Problem(n::Integer,m::Integer)
         opt = Opt(:LD_SLSQP,n)
         xtol_rel!(opt,1e-8)
         ftol_rel!(opt,1e-8)
-        Problem(n,m,x->x,zeros(n),zeros(m),eye(n),eye(m),opt)
+        Problem(n,m,(x,jac)->EmptyModel(x,jac,n,m),zeros(Float64,n),zeros(Float64,m),eye(Float64,n),eye(Float64,m),opt,false)
     end
 
-    import Base.print
-    export print
-    function print(p::Problem)
-        print("Problem(",p.n,")")
+    function EmptyModel(x::AbstractVector,jac::AbstractMatrix,n::Integer,m::Integer)
+        if length(jac) > 0
+            jac[:] = zeros(Float64,m,n)
+        end
+        return zeros(Float64,m)
     end
 
-    # functions to setup problem
-    export forward_model!, nlopt_opt!, pr_mean!, pr_covariance!, pr_σ!, pr_precision!, obs_data!, obs_covariance!, obs_σ!, obs_precision!
+    import Base.show
+    export show
+    function show(io::IO,p::Problem)
+        print(io,"Problem(",p.n,",",p.m,")")
+    end
+
+    # ===== Functions to change Problem =====
+    export forward_model!, nlopt_opt!, pr_mean!, pr_covariance!, pr_σ!, pr_precision!, obs_data!, obs_covariance!, obs_σ!, obs_precision!, verbose!
     function forward_model!(p::Problem,f::Function)
         p.f = f
     end
@@ -88,7 +96,11 @@ module RandomizeThenOptimize
         p.L_obs = chol(C_inv)'
     end
 
-    # ===== Useful Utilities =====
+    function verbose!(p::Problem, v::Bool)
+        p.verbose = v
+    end
+
+    # ===== Utilities =====
     # hcat for each element of the tuple
     function tuple_hcat(a::Tuple, b::Tuple)
         l = length(a)
@@ -104,7 +116,7 @@ module RandomizeThenOptimize
             fx = p.f(x,jacf)
             jac[:] = [p.L_pr; p.L_obs*jacf]
         else 
-            fx = p.f(x,zeros(Float64,0,0))
+            fx = p.f(x,Array(Float64,0,0))
         end
         
         r = [p.L_pr*(x - p.θ_pr); p.L_obs*(fx - p.y)]
@@ -118,7 +130,7 @@ module RandomizeThenOptimize
             Qr = Q'*residual!(x,temp,p) - ξ;
             jac[:] = Q'*temp
         else
-            Qr = Q'*residual!(x,zeros(0,0),p) - ξ;
+            Qr = Q'*residual!(x,Array(Float64,0,0),p) - ξ;
         end
         
         return Qr
@@ -126,30 +138,43 @@ module RandomizeThenOptimize
 
     function neglogpost!(x::AbstractVector, grad::AbstractVector, n::Integer, m::Integer, resid::Function)
         if length(grad) > 0
-            jac = zeros(Float64,m,n)
+            jac = Array(Float64,m,n)
         else
-            jac = zeros(Float64,0,0)
+            jac = Array(Float64,0,0)
         end
         
-        r::AbstractVector = resid(x,jac)
+        r = resid(x,jac)
         
         if length(grad) > 0
-            g::AbstractVector = jac'*r
+            g = jac'*r
             grad[:] = g
         end
         
         return dot(r,r)/2
     end
 
-    # main functions for rto
+    # used to interface with Mamba
+    export logpostgrad
+    function logpostgrad(x::AbstractVector, p::Problem)
+        ngrad = zeros(x)
+        resid = (x,jac) -> residual!(x,jac,p)
+        nlogf = neglogpost!(x,ngrad,p.n,p.n+p.m,resid)
+        return -nlogf, -ngrad
+    end
+
+    # ===== Main functions =====
     function find_map(p::Problem)
         opt = copy(p.opt)
         resid = (x,jac) -> residual!(x,jac,p)
         min_objective!(opt, (x,g) -> neglogpost!(x,g,p.n,p.n+p.m,resid) )
-        print("Optimizing for MAP... ")
-        (optf,θ_map,ret) = optimize!(opt, zeros(p.n))
-        println(ret,'.')
-        J_map = zeros(p.n+p.m,p.n)
+        if p.verbose 
+            print("Optimizing for MAP... ")
+        end
+        (optf,θ_map,ret) = optimize!(opt, zeros(Float64,p.n))
+        if p.verbose
+            println(ret,'.')
+        end
+        J_map = Array(Float64,p.n+p.m,p.n)
         residual!(θ_map, J_map, p)
         (Q,R) = qr(J_map,thin=true)
         return (θ_map, Q)
@@ -159,16 +184,16 @@ module RandomizeThenOptimize
         opt = Opt(:LD_SLSQP,p.n)
         xtol_rel!(opt,1e-8)
         ftol_rel!(opt,1e-8)
-        temp = zeros(p.n+p.m,p.n)
+        temp = Array(Float64,p.n+p.m,p.n)
         Q_resid = (x,jac) -> Q_residual!(x,jac,p,Q,ξ,temp)
         min_objective!(opt, (x,grad) -> neglogpost!(x,grad,p.n,p.n,Q_resid))
         (optf,θ,ret) = optimize!(opt, start)
         if optf > 1e-8
             warn("Large residual ",optf)
         end
-        J = zeros(p.n+p.m,p.n)
+        J = Array(Float64,p.n+p.m,p.n)
         r = residual!(θ, J, p)
-        log_w =  - dot(r,r)/2 - logdet(Q'*J) + dot(Q'*r,Q'*r)/2
+        log_w =  - dot(r,r)/2 - logabsdet(Q'*J)[1] + dot(Q'*r,Q'*r)/2
         return (θ,log_w)
     end
 
@@ -184,18 +209,36 @@ module RandomizeThenOptimize
         end
     end
 
+    # to sample
     export rto_mcmc
     function rto_mcmc(p::Problem, nsamps::Integer)
         (θ_map,Q) = find_map(p)
         ξs = randn(p.n,nsamps)
-        print("Sampling... ")
+        if p.verbose
+            print("Sampling... ")
+        end
+
         (chain,log_ws) = @parallel (tuple_hcat) for i=1:nsamps
             rto_sample(p,θ_map,Q,ξs[:,i])
         end
-        println("done.")
-        print("Metropolizing... ")
+
+        #chain = Array(Float64,p.n,nsamps)
+        #log_ws = Array(Float64,nsamps)
+
+        #for i=1:nsamps
+        #    (chaini, log_wsi) = rto_sample(p,θ_map,Q,ξs[:,i])
+        #    chain[:,i] = chaini
+        #    log_ws[i] = log_wsi
+        #end
+        
+        if p.verbose
+            println("done.")
+            print("Metropolizing... ")
+        end
         metropolize!(chain,log_ws)
-        println("done.")
+        if p.verbose
+            println("done.")
+        end
         return chain'
     end
 end
