@@ -112,7 +112,8 @@ module RandomizeThenOptimize
     function residual!(x::AbstractVector, jac::AbstractMatrix, p::Problem)
         
         if length(jac) > 0
-            jacf = view(jac,1:p.m,1:p.n)
+            jacf = Array(Float64,p.m,p.n)
+            #jacf = view(jac,1:p.m,1:p.n)
             fx = p.f(x,jacf)
             jac[:] = [p.L_pr; p.L_obs*jacf]
         else 
