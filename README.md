@@ -34,7 +34,7 @@ function myf!(x::Vector, jac::Matrix)
 end
 
 prob = Problem(n, m)
-forward_model!(prob, ff!)
+forward_model!(prob, myf!)
 chain = rto_mcmc(prob, 1000) # draw 1000 samples
 ```
 
