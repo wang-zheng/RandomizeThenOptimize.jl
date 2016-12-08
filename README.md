@@ -2,7 +2,7 @@
 
 This module implements the Randomize-then-Optimize (RTO) algorithm for sampling Bayesian posterior distributions. 
 
-Please see the [RTO paper](http://epubs.siam.org/doi/abs/10.1137/140964023) for a detailed explanation of the algorithm.
+Please see [this paper](http://epubs.siam.org/doi/abs/10.1137/140964023) for a detailed explanation of the algorithm.
 
 ## Installation
 
