@@ -27,7 +27,7 @@ function myf!(x::Vector, jac::Matrix)
     b = 6 
     c = 20
     if length(jac) > 0
-        jac[:] = c.*[cos(a*x[1]) * a/b; -1.0]' # must be a 2 by 1 matrix
+        jac[:] = c.*[cos(a*x[1]) * a/b; -1.0]' # Jacobian must be a 1 by 2 matrix
     end
     
     return c*(sin(a*x[1])/b - x[2])
