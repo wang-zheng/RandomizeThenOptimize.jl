@@ -5,22 +5,23 @@ module RandomizeThenOptimize
     # contains everything we need to describe inference problem
     export Problem, EmptyModel
     type Problem
-        n::Integer #dimension of parameters
-        m::Integer #dimension of data
-        f::Function #forward model
+        n::Integer # dimension of parameters
+        m::Integer # dimension of data
+        f::Function # forward model
         θ_pr::AbstractVector # prior mean
         y::AbstractVector # observation data
-        L_pr::AbstractMatrix #L'*L = Covariance^(-1), for prior
-        L_obs::AbstractMatrix #L'*L = Covariance^(-1), for observational noise
-        opt::NLopt.Opt #NLopt optimization settings
-        verbose::Bool #whether to output progress
+        L_pr::AbstractMatrix # L'*L = Covariance^(-1), for prior
+        L_obs::AbstractMatrix # L'*L = Covariance^(-1), for observational noise
+        opt::NLopt.Opt # NLopt optimization settings
+        guess::AbstractVector # guess for parameter MAP
+        verbose::Bool # whether to output progress
     end
 
     function Problem(n::Integer,m::Integer)
         opt = Opt(:LD_SLSQP,n)
         xtol_rel!(opt,1e-8)
         ftol_rel!(opt,1e-8)
-        Problem(n,m,(x,jac)->EmptyModel(x,jac,n,m),zeros(Float64,n),zeros(Float64,m),eye(Float64,n),eye(Float64,m),opt,false)
+        Problem(n,m,(x,jac)->EmptyModel(x,jac,n,m),zeros(Float64,n),zeros(Float64,m),eye(Float64,n),eye(Float64,m),opt,zeros(Float64,n),false)
     end
 
     function EmptyModel(x::AbstractVector,jac::AbstractMatrix,n::Integer,m::Integer)
@@ -37,7 +38,7 @@ module RandomizeThenOptimize
     end
 
     # ===== Functions to change Problem =====
-    export forward_model!, nlopt_opt!, pr_mean!, pr_covariance!, pr_σ!, pr_precision!, obs_data!, obs_covariance!, obs_σ!, obs_precision!, verbose!
+    export forward_model!, nlopt_opt!, pr_mean!, pr_covariance!, pr_σ!, pr_precision!, obs_data!, obs_covariance!, obs_σ!, obs_precision!, verbose!, guess!
     function forward_model!(p::Problem,f::Function)
         p.f = f
     end
@@ -94,6 +95,10 @@ module RandomizeThenOptimize
 
     function obs_precision!(p::Problem, C_inv::AbstractMatrix)
         p.L_obs = chol(C_inv)'
+    end
+
+    function guess!(p::Problem, x::AbstractVector)
+        p.guess = x
     end
 
     function verbose!(p::Problem, v::Bool)
@@ -171,7 +176,7 @@ module RandomizeThenOptimize
         if p.verbose 
             print("Optimizing for MAP... ")
         end
-        (optf,θ_map,ret) = optimize!(opt, zeros(Float64,p.n))
+        (optf,θ_map,ret) = optimize!(opt, p.guess)
         if p.verbose
             println(ret,'.')
         end
